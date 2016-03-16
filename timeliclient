@@ -1,0 +1,8 @@
+#!/bin/sh
+
+libdir=../lib
+bindir=.
+
+CP=$libdir/sampleclient.jar:$libdir/Prosys-OPC-UA-Java-SDK-Client-Server-Evaluation-2.2.0-552.jar:$libdir/Opc.Ua.Stack-1.02.337.4.jar:$libdir/log4j-1.2.17.jar:$libdir/slf4j-api-1.7.7.jar:$libdir/slf4j-log4j12-1.7.7.jar:$libdir/bcprov-jdk15on-152.jar:$libdir/bcpkix-jdk15on-152.jar:$libdir/httpclient-4.2.5.jar:$libdir/httpcore-4.2.4.jar:$libdir/httpcore-nio-4.2.4.jar:$libdir/commons-logging-1.1.1.jar
+
+java -classpath $bindir:$CP io.timeli.gateway.client.TimeliClient $* 

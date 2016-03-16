@@ -1,0 +1,77 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<!-- WARNING: Eclipse auto-generated file.
+              Any modifications will be overwritten.
+              To include a user specific buildfile here, simply create one in the same
+              directory with the processing instruction <?eclipse.ant.import?>
+              as the first entry and export the buildfile again. --><project basedir="." default="build" name="Timeli Gateway Client">
+    <property environment="env"/>
+    <property name="debuglevel" value="source,lines,vars"/>
+    <property name="target" value="1.7"/>
+    <property name="source" value="1.7"/>
+    <path id="Timeli Gateway Client.classpath">
+        <pathelement location="bin"/>
+        <pathelement location="lib/bcpkix-jdk15on-152.jar"/>
+        <pathelement location="lib/bcprov-jdk15on-152.jar"/>
+        <pathelement location="lib/commons-logging-1.1.1.jar"/>
+        <pathelement location="lib/httpclient-4.2.5.jar"/>
+        <pathelement location="lib/httpcore-4.2.4.jar"/>
+        <pathelement location="lib/httpcore-nio-4.2.4.jar"/>
+        <pathelement location="lib/log4j-1.2.17.jar"/>
+        <pathelement location="lib/Opc.Ua.Stack-1.02.337.4.jar"/>
+        <pathelement location="lib/Prosys-OPC-UA-Java-SDK-Client-Server-Evaluation-2.2.0-552.jar"/>
+        <pathelement location="lib/sc-core-1.52.0.0.jar"/>
+        <pathelement location="lib/scpkix-1.52.0.0.jar"/>
+        <pathelement location="lib/scprov-1.52.0.0.jar"/>
+        <pathelement location="lib/slf4j-api-1.7.7.jar"/>
+        <pathelement location="lib/slf4j-log4j12-1.7.7.jar"/>
+        <pathelement location="lib/sampleclient.jar"/>
+    </path>
+    <target name="init">
+        <mkdir dir="bin"/>
+        <copy includeemptydirs="false" todir="bin">
+            <fileset dir=".">
+                <exclude name="**/*.java"/>
+                <exclude name="**/*.properties"/>
+                <exclude name="build.xml"/>
+                <exclude name="timeliclient"/>
+                <exclude name="README.md"/>
+                <exclude name="lib/*"/>
+            </fileset>
+        </copy>
+        <copy includeemptydirs="false" flatten="true" todir="bin">
+            <fileset dir=".">
+                <include name="**/*.properties"/>
+            </fileset>
+        </copy>
+        <exec executable="cp">
+            <arg line="-R timeliclient bin"/>
+        </exec>
+    </target>
+    <target name="clean">
+        <delete dir="bin"/>
+    </target>
+    <target depends="clean" name="cleanall"/>
+    <target depends="build-subprojects,build-project" name="build"/>
+    <target name="build-subprojects"/>
+    <target depends="init" name="build-project">
+        <echo message="${ant.project.name}: ${ant.file}"/>
+        <javac debug="true" debuglevel="${debuglevel}" destdir="bin" includeantruntime="false" source="${source}" target="${target}">
+            <src path="./src"/>
+            <classpath refid="Timeli Gateway Client.classpath"/>
+        </javac>
+    </target>
+    <target description="Build all projects which reference this project. Useful to propagate changes." name="build-refprojects"/>
+    <target description="copy Eclipse compiler jars to ant lib directory" name="init-eclipse-compiler">
+        <copy todir="${ant.library.dir}">
+            <fileset dir="${ECLIPSE_HOME}/plugins" includes="org.eclipse.jdt.core_*.jar"/>
+        </copy>
+        <unzip dest="${ant.library.dir}">
+            <patternset includes="jdtCompilerAdapter.jar"/>
+            <fileset dir="${ECLIPSE_HOME}/plugins" includes="org.eclipse.jdt.core_*.jar"/>
+        </unzip>
+    </target>
+    <target description="compile project with Eclipse compiler" name="build-eclipse-compiler">
+        <property name="build.compiler" value="org.eclipse.jdt.core.JDTCompilerAdapter"/>
+        <antcall target="build"/>
+    </target>
+</project>
