@@ -2,6 +2,7 @@ package io.timeli.gateway.client;
 
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
+import java.io.FileReader;
 import java.net.URISyntaxException;
 import java.util.List;
 import java.util.ArrayList;
@@ -19,6 +20,10 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.log4j.PropertyConfigurator;
+import org.json.simple.parser.JSONParser;
+import org.json.simple.JSONObject;
+import org.json.simple.JSONArray;
+
 import org.opcfoundation.ua.builtintypes.DataValue;
 import org.opcfoundation.ua.builtintypes.DateTime;
 import org.opcfoundation.ua.builtintypes.NodeId;
@@ -35,6 +40,7 @@ import org.opcfoundation.ua.core.Identifiers;
 import org.opcfoundation.ua.core.NodeClass;
 import org.opcfoundation.ua.core.ReferenceDescription;
 import org.opcfoundation.ua.core.TimestampsToReturn;
+import org.opcfoundation.ua.utils.CertificateUtils;
 import org.opcfoundation.ua.utils.MultiDimensionArrayUtils;
 import org.opcfoundation.ua.core.ReadRawModifiedDetails;
 import org.opcfoundation.ua.core.HistoryReadValueId;
@@ -64,6 +70,7 @@ public class TimeliClient extends SampleConsoleClient {
     private static Logger logger = LoggerFactory.getLogger(TimeliClient.class);
     protected static final String HISTORY_READ_PERIOD = "history_read_period";
     protected static final Properties timeliProps = new Properties();
+    protected JSONArray readTagList = null;
     
     
     protected Set<String> browseForVariableNodesWithHistory(NodeId nodeId, List<String> historyVars)  {
@@ -136,7 +143,12 @@ public class TimeliClient extends SampleConsoleClient {
         timeliClient.initialize(args);
         timeliClient.connect();
         // Show the menu, which is the main loop of the client application
-        timeliClient.mainMenu();
+        if (timeliClient.readTagList == null) {
+            timeliClient.mainMenu();
+        }
+        else {
+            timeliClient.batchReadTagListContinuous();
+        }
         timeliClient.disconnect();
         println(APP_NAME + ": Closed");
     }
@@ -183,7 +195,11 @@ public class TimeliClient extends SampleConsoleClient {
                 case 5:
                     //Set<String> h = new HashSet<String>();
                     //h.add("ns=2;s=MyLevel");
-                    readHistoryBatch(historyVars.toArray(new String[historyVars.size()]));
+                    int secs = Integer.parseInt(timeliProps.getProperty(HISTORY_READ_PERIOD));
+                    readHistoryBatch(secs, historyVars.toArray(new String[historyVars.size()]));
+                    break;
+                case 6:
+                    batchReadTagListContinuous();
                     break;
                 default:
                     continue;
@@ -195,12 +211,51 @@ public class TimeliClient extends SampleConsoleClient {
         } while (true);
     }
     
-    protected void readHistoryBatch(String[] historyVars) {
+    protected void batchReadTagListContinuous() {
+        ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(readTagList.size());
+        Iterator<JSONObject> varIterator = readTagList.iterator();
+        while (varIterator.hasNext()) {
+            JSONObject item = varIterator.next();
+            int interval = ((Long)item.get("interval")).intValue();
+            JSONArray tags = (JSONArray)item.get("tags");   
+            List<String> tagList = new ArrayList<String>();
+            Iterator<String> tagIterator = tags.iterator();
+            while (tagIterator.hasNext()) {
+                tagList.add(tagIterator.next());
+            }
+            String[] tagArray = new String[tags.size()];
+            tagArray = tagList.toArray(tagArray);
+            scheduleBatchHistoryRead(interval, tagArray, scheduler);
+        }
+        do {
+        } while (!scheduler.isShutdown());
+    }
+    
+    private void scheduleBatchHistoryRead(int interval, String[] tags, ScheduledExecutorService scheduler) {
+        final int run_interval = interval;
+        final String[] read_tags = tags;
+        
+        Runnable run = new Runnable() {
+            public void run() { 
+                try {
+                    readHistoryBatch(run_interval, read_tags);
+                }
+                catch (Exception e) {
+                    // do nothing
+                }
+            }
+        };
+
+        final ScheduledFuture<?> handle =
+                scheduler.scheduleAtFixedRate(run, 0, run_interval, SECONDS);
+    }
+    
+    protected void readHistoryBatch(int secs, String[] historyVars) {
         DateTime endTime = DateTime.currentTime();
-        int secs = Integer.parseInt(timeliProps.getProperty(HISTORY_READ_PERIOD));
+        //int secs = Integer.parseInt(timeliProps.getProperty(HISTORY_READ_PERIOD));
         DateTime startTime = new DateTime((endTime.getMilliSeconds() - (secs * 1000)) * 10000);
         TimestampsToReturn tstamps = TimestampsToReturn.Source;
-        ReadRawModifiedDetails details = new ReadRawModifiedDetails(false, startTime, endTime, new UnsignedInteger(10), true);
+        ReadRawModifiedDetails details = new ReadRawModifiedDetails(false, startTime, endTime, new UnsignedInteger(100), true);
         List<HistoryReadValueId> ids = new ArrayList<HistoryReadValueId>();
         for (int i=0; i<historyVars.length; i++) {
             String s = historyVars[i];
@@ -258,6 +313,7 @@ public class TimeliClient extends SampleConsoleClient {
         }
         catch (Exception e) {
             printf("%s\n", e.getMessage());
+            e.printStackTrace();
         }
         
         for (int j=0; j<allValues.length; j++) {
@@ -289,6 +345,7 @@ public class TimeliClient extends SampleConsoleClient {
         System.out.println("- Enter 3 to read history                             -");
         System.out.println("- Enter 4 to read history (continuous)                -");
         System.out.println("- Enter 5 to read history in batch mode               -");
+        System.out.println("- Enter 6 to read history (continuous) in batch mode  -");
         System.out.println("-------------------------------------------------------");
     }
     
@@ -509,6 +566,44 @@ public class TimeliClient extends SampleConsoleClient {
     protected static void println(String string) {
         System.out.println(string);
         //logger.info(string);
+    }
+    
+    protected boolean parseCmdLineArgs(String[] args) throws IllegalArgumentException  {
+        List<String> oargs = new ArrayList<String>();
+        for (int i=0; i<args.length; i++) {
+            if (args[i].equals("-i")) {
+                println("Reading from file.");
+                readTagsFromFile(args[++i]);
+            }
+            else {
+                oargs.add(args[i]);
+            }
+        }
+        args = new String[oargs.size()];
+        args = oargs.toArray(args);
+        return super.parseCmdLineArgs(args);
+    }
+    
+    @SuppressWarnings("unchecked")
+    protected void readTagsFromFile(String filename) throws IllegalArgumentException {
+        JSONParser parser = new JSONParser();
+        try {
+            readTagList = (JSONArray)parser.parse(new FileReader(filename));
+            Iterator<JSONObject> varIterator = readTagList.iterator();
+            while (varIterator.hasNext()) {
+                JSONObject item = varIterator.next();
+                System.out.println("interval: "+item.get("interval"));
+                JSONArray tagList = (JSONArray)item.get("tags");
+                System.out.println("tags:");
+                Iterator<String> tagIterator = tagList.iterator();
+                while (tagIterator.hasNext()) {
+                    System.out.println(tagIterator.next());
+                }
+            }
+        }
+        catch(Exception e) {
+            throw new IllegalArgumentException(e);
+        }
     }
 
     

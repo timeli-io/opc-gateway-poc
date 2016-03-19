@@ -1,0 +1,10 @@
+[
+  {
+   "interval":60,
+   "tags":["ns=5;s=iAMAZON-E174707A.Simulation00012", "ns=5;s=iAMAZON-E174707A.Simulation00002"]
+  },
+  {
+   "interval":30,
+   "tags":["ns=5;s=iAMAZON-E174707A.Simulation00001", "ns=5;s=iAMAZON-E174707A.Simulation00004", "ns=5;s=iAMAZON-E174707A.Simulation00003"]
+  }
+]
