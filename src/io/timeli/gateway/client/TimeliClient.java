@@ -613,6 +613,7 @@ public class TimeliClient extends SampleConsoleClient {
     }
     
     /**
+     * overloaded to include logging
      * @param format
      * @param args
      */
@@ -623,6 +624,7 @@ public class TimeliClient extends SampleConsoleClient {
     }
 
     /**
+     * overloaded to include logging
      * @param string
      */
     protected static void println(String string) {
