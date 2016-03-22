@@ -73,18 +73,27 @@ public class TimeliClient extends SampleConsoleClient {
     protected JSONArray readTagList = null;
     
     
+    /**
+     * starting with the given node id (anywhere in the node hierarchy), go down
+     * the hierarchy and collect those node ids that represent variables with
+     * history data 
+     * @param nodeId
+     * @param historyVars
+     * @return Set of strings that represent node ids
+     */
     protected Set<String> browseForVariableNodesWithHistory(NodeId nodeId, List<String> historyVars)  {
         
-        //printCurrentNode(nodeId);
         List<ReferenceDescription> references;
         client.getAddressSpace().setMaxReferencesPerNode(1000);
         client.getAddressSpace().setBrowseDirection(BrowseDirection.Forward);
         client.getAddressSpace().setReferenceTypeId(Identifiers.HierarchicalReferences);
+        
+        // go down the node hierarchy within the address space of the OPC server
+        // and collect the nodes that represent variables that store history
         try {
             references = client.getAddressSpace().browse(nodeId);
             for (int i = 0; i < references.size(); i++) {
                 ReferenceDescription r = references.get(i);
-                //printf(">> %s\n", referenceToString(r));
                 if (r.getNodeClass() == NodeClass.Object)  {
                     NodeId targetNode = client.getAddressSpace().getNamespaceTable().toNodeId(r.getNodeId());
                     if (targetNode != nodeId) {
@@ -94,10 +103,8 @@ public class TimeliClient extends SampleConsoleClient {
                 else if (r.getNodeClass() == NodeClass.Variable) {
                     UaNode variable = client.getAddressSpace().getNode(client.getAddressSpace().getNamespaceTable().toNodeId(r.getNodeId()));
                     if (variable instanceof UaVariable) {
-                        //printf("Variable found-> %s\n", referenceToString(r));
                         if (((UaVariable)variable).getAccessLevel().contains(AccessLevel.HistoryRead)) { 
                             String tag = client.getAddressSpace().getNamespaceTable().toNodeId(r.getNodeId()).toString();
-                            //printf("Node: %s\n", tag);
                             historyVars.add(tag);
                         }
                     }
@@ -109,6 +116,13 @@ public class TimeliClient extends SampleConsoleClient {
         return new HashSet<String>(historyVars);
     }
 
+    /**
+     * initializes the ua client and either enters an interactive loop with the user
+     * or (if there was a file with node-ids provided as input) read the history values
+     * of the given node-ids in an infinite loop  
+     * @param args command line arguments
+     * @throws Exception
+     */
     public static void main(String[] args) throws Exception {
         // Load Log4j configurations from external file
         PropertyConfigurator.configureAndWatch(TimeliClient.class.getResource("/log.properties").getFile(), 5000);
@@ -147,12 +161,16 @@ public class TimeliClient extends SampleConsoleClient {
             timeliClient.mainMenu();
         }
         else {
-            timeliClient.batchReadTagListContinuous();
+            timeliClient.readBatchContinuous();
         }
         timeliClient.disconnect();
         println(APP_NAME + ": Closed");
     }
     
+    /**
+     * this is the routine that handles the input of the user when responding to the
+     * main menu that is displayed in interactive mode
+     */
     protected void mainMenu() throws ServerListException, URISyntaxException {
         // Identifiers contains a list of all standard node IDs
         if (nodeId == null)
@@ -164,7 +182,7 @@ public class TimeliClient extends SampleConsoleClient {
             printMenu(nodeId);
             try {
                 switch (readAction()) {
-                case ACTION_RETURN:
+                case -1:
                     disconnect();
                     return;
                 case 1:
@@ -193,13 +211,11 @@ public class TimeliClient extends SampleConsoleClient {
                     readHistoryContinuous(n);
                     break;
                 case 5:
-                    //Set<String> h = new HashSet<String>();
-                    //h.add("ns=2;s=MyLevel");
                     int secs = Integer.parseInt(timeliProps.getProperty(HISTORY_READ_PERIOD));
                     readHistoryBatch(secs, historyVars.toArray(new String[historyVars.size()]));
                     break;
                 case 6:
-                    batchReadTagListContinuous();
+                    readBatchContinuous();
                     break;
                 default:
                     continue;
@@ -211,7 +227,13 @@ public class TimeliClient extends SampleConsoleClient {
         } while (true);
     }
     
-    protected void batchReadTagListContinuous() {
+    /**
+     * readTagList contains the JSON array of all the tags to be read at various
+     * intervals. this routine reads the list of tags for every interval and schedules 
+     * a batch run for every set.
+     */
+    @SuppressWarnings("unchecked")
+    protected void readBatchContinuous() {
         ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(readTagList.size());
         Iterator<JSONObject> varIterator = readTagList.iterator();
         while (varIterator.hasNext()) {
@@ -227,10 +249,18 @@ public class TimeliClient extends SampleConsoleClient {
             tagArray = tagList.toArray(tagArray);
             scheduleBatchHistoryRead(interval, tagArray, scheduler);
         }
+        //wait until scheduler is shut down
         do {
         } while (!scheduler.isShutdown());
     }
     
+    /**
+     * the actual scheduler of the batch task for each set of tags to be run at a particular
+     * interval
+     * @param interval
+     * @param tags
+     * @param scheduler
+     */
     private void scheduleBatchHistoryRead(int interval, String[] tags, ScheduledExecutorService scheduler) {
         final int run_interval = interval;
         final String[] read_tags = tags;
@@ -241,7 +271,7 @@ public class TimeliClient extends SampleConsoleClient {
                     readHistoryBatch(run_interval, read_tags);
                 }
                 catch (Exception e) {
-                    // do nothing
+                    e.printStackTrace();
                 }
             }
         };
@@ -250,9 +280,18 @@ public class TimeliClient extends SampleConsoleClient {
                 scheduler.scheduleAtFixedRate(run, 0, run_interval, SECONDS);
     }
     
+    
+    /**
+     * this does the heavy lifting in reading history of a batch of tags from the server
+     * for each variable in the batch, history read interval is from 
+     * (current_time - secs) to current_time.  if this task is scheduled every 'secs'
+     * seconds, then coverage will be complete
+     * @param secs
+     * @param historyVars
+     */
+    @SuppressWarnings("unchecked")
     protected void readHistoryBatch(int secs, String[] historyVars) {
         DateTime endTime = DateTime.currentTime();
-        //int secs = Integer.parseInt(timeliProps.getProperty(HISTORY_READ_PERIOD));
         DateTime startTime = new DateTime((endTime.getMilliSeconds() - (secs * 1000)) * 10000);
         TimestampsToReturn tstamps = TimestampsToReturn.Source;
         ReadRawModifiedDetails details = new ReadRawModifiedDetails(false, startTime, endTime, new UnsignedInteger(100), true);
@@ -325,6 +364,9 @@ public class TimeliClient extends SampleConsoleClient {
         }
     }
     
+    /**
+     * the menu displayed to the user ininteractive mode
+     */
     protected void printMenu(NodeId nodeId) {
         println("");
         println("");
@@ -349,6 +391,9 @@ public class TimeliClient extends SampleConsoleClient {
         System.out.println("-------------------------------------------------------");
     }
     
+    /**
+     * reads the history of an individual node. is interactive
+     */
     protected void readHistory(NodeId nodeId) throws ServiceException, StatusException, AddressSpaceException {
         UaNode node = client.getAddressSpace().getNode(nodeId);
 
@@ -406,7 +451,6 @@ public class TimeliClient extends SampleConsoleClient {
                 }
 
                 if (values != null) {
-                    println("Count = " + values.length);
                     for (int i = 0; i < values.length; i++)
                         println("Value " + (i + 1) + " = " + values[i].getValue().getValue() + " | "
                                 + values[i].getSourceTimestamp());
@@ -454,6 +498,14 @@ public class TimeliClient extends SampleConsoleClient {
                     + node.getNodeClass() + ".");
     }
     
+    /**
+     * read history in continuous loop. here, the loop is broken when another scheduled 
+     * task stops the scheduler
+     * @param nodeId
+     * @throws ServiceException
+     * @throws StatusException
+     * @throws AddressSpaceException
+     */
     protected void readHistoryContinuous(NodeId nodeId)
               throws ServiceException, StatusException, AddressSpaceException {
         
@@ -474,6 +526,7 @@ public class TimeliClient extends SampleConsoleClient {
        final ScheduledFuture<?> runHandle =
                scheduler.scheduleAtFixedRate(runHistory, 10, 20, SECONDS);
        
+       // task to stop the above task after 60 seconds 
        scheduler.schedule(new Runnable() {
            public void run() {
                printf(">> Shutting down continuous read..\n");
@@ -487,6 +540,10 @@ public class TimeliClient extends SampleConsoleClient {
        
     }
     
+    /**
+     * return a node id by translating user input into one. 
+     * @return
+     */
     protected NodeId readNodeTag() {
         print("Enter Node Id --> ");
         BufferedReader stdin = new BufferedReader(new InputStreamReader(System.in));
@@ -504,6 +561,11 @@ public class TimeliClient extends SampleConsoleClient {
         return n;
     }
     
+    /**
+     * read the present value of a node
+     * @param nodeId
+     * @throws Exception
+     */
     protected void readValue(NodeId nodeId) throws Exception {
         UaNode variable = client.getAddressSpace().getNode(nodeId);
         if (variable instanceof UaVariable) {
@@ -568,6 +630,10 @@ public class TimeliClient extends SampleConsoleClient {
         //logger.info(string);
     }
     
+    /**
+     * overloaded function to handle only the '-i' argument. handling of all other 
+     * command line arguments is delegated to the parent function
+     */
     protected boolean parseCmdLineArgs(String[] args) throws IllegalArgumentException  {
         List<String> oargs = new ArrayList<String>();
         for (int i=0; i<args.length; i++) {
@@ -584,6 +650,12 @@ public class TimeliClient extends SampleConsoleClient {
         return super.parseCmdLineArgs(args);
     }
     
+    /**
+     * read the tags and intervals at which to read them from the input JSON format file
+     * read them into the global variable readTagList
+     * @param filename
+     * @throws IllegalArgumentException
+     */
     @SuppressWarnings("unchecked")
     protected void readTagsFromFile(String filename) throws IllegalArgumentException {
         JSONParser parser = new JSONParser();
